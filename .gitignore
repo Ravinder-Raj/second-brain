@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+.eggs/
+
+# Environment
+.env
+.env.local
+*.env
+
+# GraphRAG output (large files)
+backend/graphrag_output/
+backend/graphrag_cache/
+*.parquet
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+.dockerignore
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# AWS
+.aws/
+terraform.tfstate
+*.tfvars
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
