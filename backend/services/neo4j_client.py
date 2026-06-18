@@ -11,18 +11,23 @@ class Neo4jClient:
     Single responsibility: all Neo4j operations live here.
     No router or service ever writes Cypher directly.
     One instance shared across the entire app (singleton).
+    Driver is NOT created at import time — lifespan controls the connection.
     """
 
     def __init__(self):
+        self.driver = None
+
+    def connect(self):
         """
-        This constructor create neo4j driver
-        verify the connection and fail when databse inunvauale for debugging
+        Called once in FastAPI lifespan startup.
+        Separates module import from connection establishment —
+        so a slow Neo4j boot doesn't crash the container before FastAPI starts.
         """
         try:
             self.driver = GraphDatabase.driver(
                 settings.neo4j_uri,
                 auth=(settings.neo4j_username, settings.neo4j_password),
-                notifications_min_severity="OFF", 
+                notifications_min_severity="OFF",
             )
             self.driver.verify_connectivity()
             logger.info("Neo4j connected successfully")
@@ -33,9 +38,16 @@ class Neo4jClient:
             logger.error("Neo4j unreachable — check NEO4J_URI")
             raise
 
+    def verify_connection(self):
+        """Called by /health endpoint to confirm DB is still reachable."""
+        if self.driver is None:
+            raise RuntimeError("Neo4j driver not initialized")
+        self.driver.verify_connectivity()
+
     def close(self):
-        self.driver.close()
-        logger.info("Neo4j driver closed")
+        if self.driver:
+            self.driver.close()
+            logger.info("Neo4j driver closed")
 
     # ── Documents ──────────────────────────────────────────────────
 
@@ -218,10 +230,10 @@ class Neo4jClient:
             edges_result = session.run(
                 """
                 MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-                RETURN a.id       AS source,
-                       b.id       AS target,
-                       r.type     AS rel_type,
-                       r.description AS description
+                RETURN a.id           AS source,
+                       b.id           AS target,
+                       r.type         AS rel_type,
+                       r.description  AS description
                 LIMIT 400
                 """
             )
@@ -233,8 +245,7 @@ class Neo4jClient:
     def get_relevant_subgraph(self, entity_names: list[str]) -> dict:
         """
         Returns subgraph around specific entities.
-        Used to highlight relevant nodes in Cytoscape.js
-        after a user query.
+        Used to highlight relevant nodes in Cytoscape.js after a user query.
         """
         with self.driver.session() as session:
             result = session.run(
@@ -287,6 +298,6 @@ class Neo4jClient:
 
 
 # ── Singleton ──────────────────────────────────────────────────────
-# Created once when this module is first imported.
-# Every router imports this object — never instantiates Neo4jClient directly.
+# Module import creates the object but does NOT connect.
+# Call neo4j_client.connect() in FastAPI lifespan startup.
 neo4j_client = Neo4jClient()

@@ -10,3 +10,4 @@ langchain-nvidia-ai-endpoints
 boto3==1.34.144
 python-multipart==0.0.9
 httpx==0.27.0
+pypdf
