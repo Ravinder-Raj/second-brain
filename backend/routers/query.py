@@ -53,13 +53,13 @@ async def _build_context(question: str, mode: QueryMode, doc_ids: list[str] | No
     # Discover mode → global search (community summaries, broad patterns)
     # Connect/Challenge → local search (specific entity neighborhoods)
     try:
-        graphrag_result = await graphrag_service.search(
-            query=question,
-            mode=mode,
-            doc_ids=doc_ids,
-        )
-        if graphrag_result:
-            context_parts.append(f"## GraphRAG Insights\n{graphrag_result}")
+        if mode == QueryMode.DISCOVER:
+            graphrag_result = await graphrag_service.global_search(query=question)
+        else:
+            graphrag_result = await graphrag_service.local_search(query=question)
+
+        if graphrag_result and graphrag_result.response:
+            context_parts.append(f"## GraphRAG Insights\n{graphrag_result.response}")
     except Exception as e:
         # Non-fatal — fall back to Neo4j-only context
         logger.warning(f"GraphRAG search failed, falling back to Neo4j only: {e}")
