@@ -28,6 +28,8 @@ class Neo4jClient:
                 settings.neo4j_uri,
                 auth=(settings.neo4j_username, settings.neo4j_password),
                 notifications_min_severity="OFF",
+                max_connection_lifetime=300,
+                liveness_check_timeout=30,
             )
             self.driver.verify_connectivity()
             logger.info("Neo4j connected successfully")
@@ -56,7 +58,7 @@ class Neo4jClient:
         MERGE — not CREATE. Same document uploaded twice
         updates it instead of creating a duplicate node.
         """
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MERGE (d:Document {id: $id})
@@ -75,7 +77,7 @@ class Neo4jClient:
 
     def mark_document_indexed(self, doc_id: str):
         """Called by Lambda after GraphRAG finishes indexing."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -88,7 +90,7 @@ class Neo4jClient:
 
     def mark_document_failed(self, doc_id: str, error: str):
         """Called by Lambda if GraphRAG indexing fails."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -103,7 +105,7 @@ class Neo4jClient:
 
     def get_document_status(self, doc_id: str) -> dict | None:
         """Used by /ingest/status polling endpoint."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             result = session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -122,7 +124,7 @@ class Neo4jClient:
 
     def get_all_documents(self) -> list[dict]:
         """Returns all documents for the sidebar list in frontend."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             result = session.run(
                 """
                 MATCH (d:Document)
@@ -142,7 +144,7 @@ class Neo4jClient:
         Deletes document and ALL its related entities.
         DETACH DELETE removes the node AND all its relationships.
         """
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -169,7 +171,7 @@ class Neo4jClient:
         This is the core of GraphRAG — shared entities create
         cross-document connections automatically.
         """
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MERGE (e:Entity {id: $id})
@@ -195,7 +197,7 @@ class Neo4jClient:
         description: str,
     ):
         """Saves a relationship between two entities extracted by GraphRAG."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             session.run(
                 """
                 MATCH (a:Entity {id: $source_id})
@@ -216,7 +218,7 @@ class Neo4jClient:
         Returns all nodes + edges formatted for Cytoscape.js.
         Cytoscape expects: {"nodes": [{"data": {...}}], "edges": [{"data": {...}}]}
         """
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             nodes_result = session.run(
                 """
                 MATCH (e:Entity)
@@ -247,7 +249,7 @@ class Neo4jClient:
         Returns subgraph around specific entities.
         Used to highlight relevant nodes in Cytoscape.js after a user query.
         """
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             result = session.run(
                 """
                 MATCH (e:Entity)
@@ -280,7 +282,7 @@ class Neo4jClient:
 
     def search_entities(self, query: str) -> list[dict]:
         """Full-text search across entity names and descriptions."""
-        with self.driver.session() as session:
+        with self.driver.session(database=settings.neo4j_database) as session:
             result = session.run(
                 """
                 MATCH (e:Entity)

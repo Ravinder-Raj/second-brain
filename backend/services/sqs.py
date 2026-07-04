@@ -18,7 +18,7 @@ def get_sqs_client():
     if _sqs_client is None:
         _sqs_client = boto3.client(
             "sqs",
-            region_name=settings.AWS_REGION,
+            region_name=settings.aws_region,
             config=Config(retries={"max_attempts": 3, "mode": "standard"}),
         )
     return _sqs_client
@@ -65,7 +65,7 @@ async def enqueue_job(doc_id: str, s3_key: str, filename: str) -> str:
 
     try:
         response = get_sqs_client().send_message(
-            QueueUrl=settings.SQS_QUEUE_URL,
+            QueueUrl=settings.sqs_queue_url,
             MessageBody=message_body,
             # MessageDeduplicationId not needed — Standard queue (not FIFO)
         )

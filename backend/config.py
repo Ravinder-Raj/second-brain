@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     neo4j_uri: str
     neo4j_username: str
     neo4j_password: str
+    neo4j_database: str = "neo4j"
 
     # ── NVIDIA NIM ───────────────────────────────────────
     nvidia_api_key: str
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────
     app_env: str = "development"
+    graphrag_workdir: str = "/var/www/html/python/second-brain/backend/graphrag_workdir"
     allowed_origins: str = "http://localhost:5173"
 
     @property

@@ -16,7 +16,7 @@ def get_s3_client():
     if _s3_client is None:
         _s3_client = boto3.client(
             "s3",
-            region_name=settings.AWS_REGION,
+            region_name=settings.aws_region,
             config=Config(
                 retries={"max_attempts": 3, "mode": "standard"},
                 signature_version="s3v4",  # required for presigned URLs in all regions
@@ -42,12 +42,12 @@ async def upload_file(file_bytes: bytes, s3_key: str, content_type: str = "appli
     """
     try:
         get_s3_client().put_object(
-            Bucket=settings.S3_BUCKET_UPLOADS,
+            Bucket=settings.s3_bucket_uploads,
             Key=s3_key,
             Body=file_bytes,
             ContentType=content_type,
         )
-        logger.info(f"Uploaded {len(file_bytes)} bytes → s3://{settings.S3_BUCKET_UPLOADS}/{s3_key}")
+        logger.info(f"Uploaded {len(file_bytes)} bytes → s3://{settings.s3_bucket_uploads}/{s3_key}")
         return s3_key
 
     except ClientError as e:
@@ -75,11 +75,11 @@ async def get_file(s3_key: str) -> bytes:
     """
     try:
         response = get_s3_client().get_object(
-            Bucket=settings.S3_BUCKET_UPLOADS,
+            Bucket=settings.s3_bucket_uploads,
             Key=s3_key,
         )
         file_bytes = response["Body"].read()
-        logger.info(f"Downloaded {len(file_bytes)} bytes ← s3://{settings.S3_BUCKET_UPLOADS}/{s3_key}")
+        logger.info(f"Downloaded {len(file_bytes)} bytes ← s3://{settings.s3_bucket_uploads}/{s3_key}")
         return file_bytes
 
     except ClientError as e:
@@ -114,7 +114,7 @@ def generate_presigned_url(s3_key: str, expiry_seconds: int = 3600) -> str:
         url = get_s3_client().generate_presigned_url(
             "get_object",
             Params={
-                "Bucket": settings.S3_BUCKET_UPLOADS,
+                "Bucket": settings.s3_bucket_uploads,
                 "Key": s3_key,
             },
             ExpiresIn=expiry_seconds,
