@@ -1,6 +1,7 @@
 # /config.py
 
 #------- IMPORTS -------------------------------------------------
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -10,14 +11,17 @@ Class Setting to read variable from env files.
 We are using pydantic class so if any variable is missing our app not crashed just a simple error message for that variable
 '''
 
+# Resolve paths relative to this file so the app works in Docker, Lambda, etc.
+_BASE_DIR = Path(__file__).resolve().parent
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="/var/www/html/python/second-brain/backend/.env",
+        env_file=str(_BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
 
-   # ── Neo4j ────────────────────────────────────────────
+    # ── Neo4j ────────────────────────────────────────────
     neo4j_uri: str
     neo4j_username: str
     neo4j_password: str
@@ -34,7 +38,7 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────
     app_env: str = "development"
-    graphrag_workdir: str = "/var/www/html/python/second-brain/backend/graphrag_workdir"
+    graphrag_workdir: str = str(_BASE_DIR / "graphrag_workdir")
     allowed_origins: str = "http://localhost:5173"
 
     @property

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from services.neo4j_client import neo4j_client
+from services.graphrag import graphrag_service
 from routers import ingest, query, graph
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -30,6 +31,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         # Crash on startup if DB is unreachable — better than silent failure
         logger.error(f"Neo4j connection failed on startup: {e}", exc_info=True)
+        raise
+
+    # Initialize GraphRAG working directories (vector store, output dirs)
+    try:
+        graphrag_service.initialize()
+        logger.info("GraphRAG service initialized ✓")
+    except Exception as e:
+        logger.error(f"GraphRAG initialization failed: {e}", exc_info=True)
         raise
 
     yield  # app is running and serving requests

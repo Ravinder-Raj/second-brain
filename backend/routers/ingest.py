@@ -335,3 +335,5 @@ async def delete_document(doc_id: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete document",
         )
+
+    return None  # 204 No Content — explicit return for clarity

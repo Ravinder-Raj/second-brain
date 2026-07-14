@@ -106,6 +106,11 @@ def _process_job(job: dict, neo4j_client, graphrag_service, get_file_fn) -> None
     doesn't prevent other documents in the same batch from processing.
     Marks the document as failed in Neo4j on any error.
 
+    Uses a single event loop for all async calls — avoids the
+    "RuntimeError: This event loop is already running" that happens
+    when calling asyncio.run() multiple times in Lambda runtimes
+    that already have an active event loop.
+
     Args:
         job:              parsed SQS message dict {job_id, doc_id, s3_key, filename}
         neo4j_client:     Neo4jClient singleton
@@ -121,10 +126,15 @@ def _process_job(job: dict, neo4j_client, graphrag_service, get_file_fn) -> None
 
     logger.info(f"Processing job | job_id={job_id} doc_id={doc_id} s3_key={s3_key}")
 
+    # Create a single event loop for all async calls in this job.
+    # This avoids calling asyncio.run() twice (which would fail if a loop
+    # is already running in the Lambda Python runtime).
+    loop = asyncio.new_event_loop()
+
     try:
         # ── Step 1: Fetch file from S3 ──
         logger.info(f"Fetching from S3 | key={s3_key}")
-        file_bytes = asyncio.run(get_file_fn(s3_key))
+        file_bytes = loop.run_until_complete(get_file_fn(s3_key))
         logger.info(f"S3 fetch complete | size={len(file_bytes)} bytes")
 
         # ── Step 2: Decode to text ──
@@ -135,7 +145,7 @@ def _process_job(job: dict, neo4j_client, graphrag_service, get_file_fn) -> None
 
         # ── Step 3: Run GraphRAG indexing ──
         logger.info(f"Starting GraphRAG indexing | doc_id={doc_id}")
-        result = asyncio.run(graphrag_service.run_indexing(doc_id=doc_id, text=text))
+        result = loop.run_until_complete(graphrag_service.run_indexing(doc_id=doc_id, text=text))
         logger.info(
             f"GraphRAG complete | doc_id={doc_id} "
             f"entities={len(result.entities)} "
@@ -163,6 +173,9 @@ def _process_job(job: dict, neo4j_client, graphrag_service, get_file_fn) -> None
         neo4j_client.mark_document_failed(doc_id, error_msg)
         # Raise so SQS retries the message (transient failures like NIM timeout)
         raise
+
+    finally:
+        loop.close()
 
 
 def _extract_text(file_bytes: bytes, s3_key: str) -> str:

@@ -1,9 +1,45 @@
+import asyncio
 import logging
+import time
+from functools import wraps
 from neo4j import GraphDatabase
-from neo4j.exceptions import ServiceUnavailable, AuthError
+from neo4j.exceptions import ServiceUnavailable, AuthError, Neo4jError
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def with_retry(max_attempts: int = 3, base_delay: float = 1.0):
+    """
+    Retries on transient Neo4j failures — handles Aura free-tier
+    pause/wake-up delays where the db briefly isn't reachable
+    right after resuming from idle (e.g. DatabaseNotFound, ServiceUnavailable).
+
+    NOTE: Neo4j driver methods are synchronous, so time.sleep() is used
+    intentionally here. When called from async route handlers, wrap the
+    call in asyncio.to_thread() to avoid blocking the event loop.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except (ServiceUnavailable, Neo4jError) as e:
+                    last_error = e
+                    if attempt == max_attempts:
+                        break
+                    delay = base_delay * attempt
+                    logger.warning(
+                        f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+            logger.error(f"{func.__name__} failed after {max_attempts} attempts: {last_error}")
+            raise last_error
+        return wrapper
+    return decorator
 
 
 class Neo4jClient:
@@ -53,6 +89,7 @@ class Neo4jClient:
 
     # ── Documents ──────────────────────────────────────────────────
 
+    @with_retry()
     def save_document(self, doc_id: str, title: str, source_type: str, raw_text: str):
         """
         MERGE — not CREATE. Same document uploaded twice
@@ -75,6 +112,7 @@ class Neo4jClient:
             )
             logger.info(f"Document saved: {doc_id}")
 
+    @with_retry()
     def mark_document_indexed(self, doc_id: str):
         """Called by Lambda after GraphRAG finishes indexing."""
         with self.driver.session(database=settings.neo4j_database) as session:
@@ -88,6 +126,7 @@ class Neo4jClient:
             )
             logger.info(f"Document marked indexed: {doc_id}")
 
+    @with_retry()
     def mark_document_failed(self, doc_id: str, error: str):
         """Called by Lambda if GraphRAG indexing fails."""
         with self.driver.session(database=settings.neo4j_database) as session:
@@ -103,6 +142,7 @@ class Neo4jClient:
             )
             logger.error(f"Document marked failed: {doc_id} — {error}")
 
+    @with_retry()
     def get_document_status(self, doc_id: str) -> dict | None:
         """Used by /ingest/status polling endpoint."""
         with self.driver.session(database=settings.neo4j_database) as session:
@@ -122,6 +162,7 @@ class Neo4jClient:
             record = result.single()
             return dict(record) if record else None
 
+    @with_retry()
     def get_all_documents(self) -> list[dict]:
         """Returns all documents for the sidebar list in frontend."""
         with self.driver.session(database=settings.neo4j_database) as session:
@@ -139,6 +180,7 @@ class Neo4jClient:
             )
             return [dict(r) for r in result]
 
+    @with_retry()
     def delete_document(self, doc_id: str):
         """
         Deletes document and ALL its related entities.
@@ -157,6 +199,7 @@ class Neo4jClient:
 
     # ── Entities ───────────────────────────────────────────────────
 
+    @with_retry()
     def save_entity(
         self,
         entity_id: str,
@@ -189,6 +232,7 @@ class Neo4jClient:
                 doc_id=doc_id,
             )
 
+    @with_retry()
     def save_relationship(
         self,
         source_id: str,
@@ -211,39 +255,79 @@ class Neo4jClient:
                 description=description,
             )
 
+    @with_retry()
+    def save_community(
+        self,
+        community_id: str,
+        title: str,
+        summary: str,
+        level: int,
+        doc_id: str,
+    ):
+        """
+        Save a community (cluster of related entities) with its LLM summary.
+        MERGE on community id so re-indexing updates instead of duplicating.
+        Links the community to its source document.
+        """
+        with self.driver.session(database=settings.neo4j_database) as session:
+            session.run(
+                """
+                MERGE (c:Community {id: $id})
+                SET c.title   = $title,
+                    c.summary = $summary,
+                    c.level   = $level
+                WITH c
+                MATCH (d:Document {id: $doc_id})
+                MERGE (d)-[:HAS_COMMUNITY]->(c)
+                """,
+                id=community_id,
+                title=title,
+                summary=summary,
+                level=level,
+                doc_id=doc_id,
+            )
+            logger.info(f"Community saved: {community_id} ({title})")
+
     # ── Graph data for Cytoscape.js ────────────────────────────────
 
+    @with_retry()
     def get_full_graph(self) -> dict:
         """
         Returns all nodes + edges formatted for Cytoscape.js.
         Cytoscape expects: {"nodes": [{"data": {...}}], "edges": [{"data": {...}}]}
+
+        Uses a single transaction to avoid race conditions where an entity
+        is deleted between two separate queries.
         """
         with self.driver.session(database=settings.neo4j_database) as session:
-            nodes_result = session.run(
-                """
-                MATCH (e:Entity)
-                RETURN e.id          AS id,
-                       e.name        AS name,
-                       e.type        AS type,
-                       e.description AS description
-                LIMIT 200
-                """
-            )
-            edges_result = session.run(
-                """
-                MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-                RETURN a.id           AS source,
-                       b.id           AS target,
-                       r.type         AS rel_type,
-                       r.description  AS description
-                LIMIT 400
-                """
-            )
-            return {
-                "nodes": [{"data": dict(r)} for r in nodes_result],
-                "edges": [{"data": dict(r)} for r in edges_result],
-            }
+            with session.begin_transaction() as tx:
+                nodes_result = tx.run(
+                    """
+                    MATCH (e:Entity)
+                    RETURN e.id          AS id,
+                           e.name        AS name,
+                           e.type        AS type,
+                           e.description AS description
+                    LIMIT 200
+                    """
+                )
+                nodes = [{"data": dict(r)} for r in nodes_result]
 
+                edges_result = tx.run(
+                    """
+                    MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+                    RETURN a.id           AS source,
+                           b.id           AS target,
+                           r.type         AS rel_type,
+                           r.description  AS description
+                    LIMIT 400
+                    """
+                )
+                edges = [{"data": dict(r)} for r in edges_result]
+
+            return {"nodes": nodes, "edges": edges}
+
+    @with_retry()
     def get_relevant_subgraph(self, entity_names: list[str]) -> dict:
         """
         Returns subgraph around specific entities.
@@ -271,15 +355,17 @@ class Neo4jClient:
                     nodes[c["id"]] = {
                         "data": {"id": c["id"], "name": c["name"], "type": c["type"]}
                     }
+                    r = record["r"]
                     edges.append({"data": {
                         "source": e["id"],
                         "target": c["id"],
-                        "rel_type": record["r"].type,
+                        "rel_type": r["type"] if "type" in r else r.type,
                     }})
             return {"nodes": list(nodes.values()), "edges": edges}
 
     # ── Search ─────────────────────────────────────────────────────
 
+    @with_retry()
     def search_entities(self, query: str) -> list[dict]:
         """Full-text search across entity names and descriptions."""
         with self.driver.session(database=settings.neo4j_database) as session:

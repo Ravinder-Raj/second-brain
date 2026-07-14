@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -64,10 +65,11 @@ async def enqueue_job(doc_id: str, s3_key: str, filename: str) -> str:
     })
 
     try:
-        response = get_sqs_client().send_message(
+        # Run sync boto3 in a thread to avoid blocking the async event loop
+        response = await asyncio.to_thread(
+            get_sqs_client().send_message,
             QueueUrl=settings.sqs_queue_url,
             MessageBody=message_body,
-            # MessageDeduplicationId not needed — Standard queue (not FIFO)
         )
         message_id = response.get("MessageId", "unknown")
         logger.info(f"Enqueued job {job_id} (doc={doc_id}, sqs_message={message_id})")

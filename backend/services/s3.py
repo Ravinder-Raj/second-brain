@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import boto3
 from botocore.exceptions import ClientError
@@ -41,7 +42,10 @@ async def upload_file(file_bytes: bytes, s3_key: str, content_type: str = "appli
         RuntimeError: if the upload fails after retries.
     """
     try:
-        get_s3_client().put_object(
+        # Run sync boto3 in a thread to avoid blocking the async event loop.
+        # Without this, health checks and other requests stall during uploads.
+        await asyncio.to_thread(
+            get_s3_client().put_object,
             Bucket=settings.s3_bucket_uploads,
             Key=s3_key,
             Body=file_bytes,
@@ -74,7 +78,9 @@ async def get_file(s3_key: str) -> bytes:
         RuntimeError: for other S3 errors.
     """
     try:
-        response = get_s3_client().get_object(
+        # Run sync boto3 in a thread to avoid blocking the async event loop
+        response = await asyncio.to_thread(
+            get_s3_client().get_object,
             Bucket=settings.s3_bucket_uploads,
             Key=s3_key,
         )

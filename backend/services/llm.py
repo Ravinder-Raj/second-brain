@@ -174,17 +174,25 @@ class LLMService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        # LangChain ChatOpenAI pointing at NVIDIA NIM.
-        # streaming=True is required — without it, astream() returns one chunk.
-        # temperature=0 for deterministic, factual responses.
-        self._llm = ChatOpenAI(
-            api_key     = self._settings.nvidia_api_key,
-            base_url    = NVIDIA_NIM_BASE_URL,
-            model       = NVIDIA_NIM_MODEL,
-            temperature = 0.0,
-            max_tokens  = 1500,
-            streaming   = True,
-        )
+        # Lazy-initialized — not created at import time so a bad API key
+        # doesn't crash the app before it even starts serving requests.
+        self._llm: ChatOpenAI | None = None
+
+    def _get_llm(self) -> ChatOpenAI:
+        """
+        Lazily build the ChatOpenAI client on first use.
+        This avoids crashing at import time if NVIDIA_API_KEY is invalid/placeholder.
+        """
+        if self._llm is None:
+            self._llm = ChatOpenAI(
+                api_key     = self._settings.nvidia_api_key,
+                base_url    = NVIDIA_NIM_BASE_URL,
+                model       = NVIDIA_NIM_MODEL,
+                temperature = 0.0,
+                max_tokens  = 1500,
+                streaming   = True,
+            )
+        return self._llm
 
     async def stream_response(
         self,
@@ -228,7 +236,7 @@ class LLMService:
 
         token_count = 0
         try:
-            async for chunk in self._llm.astream(messages):
+            async for chunk in self._get_llm().astream(messages):
                 # chunk is an AIMessageChunk — .content is the text fragment
                 text = chunk.content
                 if text:
@@ -261,7 +269,7 @@ class LLMService:
             f"{text[:500]}"
         )
         try:
-            response = await self._llm.ainvoke([HumanMessage(content=prompt)])
+            response = await self._get_llm().ainvoke([HumanMessage(content=prompt)])
             title = response.content.strip().strip('"').strip("'")
             logger.info("Generated title: %r", title)
             return title
