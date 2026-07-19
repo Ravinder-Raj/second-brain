@@ -1,3 +1,163 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Base layer overrides ─────────────────────────────────────────────── */
+@layer base {
+  /* Smooth scrolling across the app */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Custom scrollbar — thin, dark, matches the theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  /* Remove default focus outline, add custom ring */
+  *:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.5);
+    border-radius: 4px;
+  }
+}
+
+/* ── Component utilities ──────────────────────────────────────────────── */
+@layer components {
+  /* Glassmorphism panel effect */
+  .glass {
+    background: rgba(17, 24, 39, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* Subtle glow effect for primary elements */
+  .glow-brand {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.15),
+                0 0 60px rgba(6, 182, 212, 0.05);
+  }
+
+  /* Markdown content styling inside chat responses */
+  .prose-chat h1,
+  .prose-chat h2,
+  .prose-chat h3 {
+    color: #e5e7eb;
+    font-weight: 600;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+  }
+  .prose-chat h1 { font-size: 1.25rem; }
+  .prose-chat h2 { font-size: 1.1rem; }
+  .prose-chat h3 { font-size: 1rem; }
+
+  .prose-chat p {
+    margin-bottom: 0.75em;
+    line-height: 1.7;
+    color: #d1d5db;
+  }
+
+  .prose-chat ul,
+  .prose-chat ol {
+    margin-left: 1.25em;
+    margin-bottom: 0.75em;
+    color: #d1d5db;
+  }
+  .prose-chat li {
+    margin-bottom: 0.25em;
+  }
+
+  .prose-chat code {
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.875em;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+  }
+
+  .prose-chat pre {
+    background: rgba(5, 8, 16, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 1em;
+    overflow-x: auto;
+    margin-bottom: 0.75em;
+  }
+  .prose-chat pre code {
+    background: none;
+    padding: 0;
+    color: #e5e7eb;
+  }
+
+  .prose-chat blockquote {
+    border-left: 3px solid #06b6d4;
+    padding-left: 1em;
+    margin-left: 0;
+    margin-bottom: 0.75em;
+    color: #9ca3af;
+    font-style: italic;
+  }
+
+  .prose-chat strong {
+    color: #f3f4f6;
+    font-weight: 600;
+  }
+
+  .prose-chat a {
+    color: #06b6d4;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose-chat a:hover {
+    color: #22d3ee;
+  }
+
+  .prose-chat table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.75em;
+  }
+  .prose-chat th,
+  .prose-chat td {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.5em 0.75em;
+    text-align: left;
+  }
+  .prose-chat th {
+    background: rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+  }
+}
+
+/* ── Utility classes ──────────────────────────────────────────────────── */
+@layer utilities {
+  /* Typing cursor animation for streaming messages */
+  .typing-cursor::after {
+    content: "▊";
+    animation: blink 1s step-end infinite;
+    color: #06b6d4;
+    margin-left: 1px;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+}
