@@ -196,6 +196,7 @@ def _extract_text(file_bytes: bytes, s3_key: str) -> str:
 def _extract_pdf_text(file_bytes: bytes) -> str:
     """Extract text from PDF bytes using pypdf."""
     try:
+        # pyrefly: ignore [missing-import]
         import pypdf
         from io import BytesIO
 
