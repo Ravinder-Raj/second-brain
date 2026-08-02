@@ -1,0 +1,38 @@
+{
+  "family": "second-brain-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "taskRoleArn": "arn:aws:iam::319918321593:role/second-brain-task-role",
+  "executionRoleArn": "arn:aws:iam::319918321593:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "second-brain-backend",
+      "image": "319918321593.dkr.ecr.ap-southeast-2.amazonaws.com/second-brain-backend:latest",
+      "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+      "secrets": [
+        {"name": "NVIDIA_API_KEY", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:NVIDIA_API_KEY::"},
+        {"name": "NEO4J_URI", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:NEO4J_URI::"},
+        {"name": "NEO4J_USERNAME", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:NEO4J_USERNAME::"},
+        {"name": "NEO4J_PASSWORD", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:NEO4J_PASSWORD::"},
+        {"name": "NEO4J_DATABASE", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:NEO4J_DATABASE::"},
+        {"name": "AWS_REGION", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:AWS_REGION::"},
+        {"name": "S3_BUCKET_UPLOADS", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:S3_BUCKET_UPLOADS::"},
+        {"name": "S3_BUCKET_FRONTEND", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:S3_BUCKET_FRONTEND::"},
+        {"name": "SQS_QUEUE_URL", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:SQS_QUEUE_URL::"},
+        {"name": "APP_ENV", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:APP_ENV::"},
+        {"name": "ALLOWED_ORIGINS", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:319918321593:secret:second-brain/production-djmqUY:ALLOWED_ORIGINS::"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/second-brain-backend",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

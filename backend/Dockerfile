@@ -16,10 +16,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Unbuffered stdout so logs reach CloudWatch in real time, not delayed
+# in chunks — makes live debugging on ECS actually usable.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code
+# Copy application code (respects .dockerignore — .env never gets in here)
 COPY . .
 
 # Create graphrag workdir (writable at runtime)
@@ -37,5 +42,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Run with uvicorn — 1 worker because we use in-memory state (_job_map)
+# Run with uvicorn — 1 worker because we use in-memory state (_job_map).
+# NOTE: this means desiredCount on the ECS service must stay at 1 —
+# more tasks means each has its own job_map and status polling breaks.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
