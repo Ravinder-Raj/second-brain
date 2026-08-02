@@ -183,7 +183,13 @@ class Neo4jClient:
                 ORDER BY d.created_at DESC
                 """
             )
-            return [dict(r) for r in result]
+            docs = []
+            for r in result:
+                item = dict(r)
+                if item.get("created_at") is not None:
+                    item["created_at"] = str(item["created_at"])
+                docs.append(item)
+            return docs
 
     @with_retry()
     def delete_document(self, doc_id: str):

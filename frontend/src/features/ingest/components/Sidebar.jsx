@@ -172,8 +172,8 @@ function DocumentItem({ doc, isSelected, isDeleting, onSelect, onDelete }) {
             {statusIcon} {statusLabel}
           </span>
         </div>
-        {doc.created_at && (
-          <p className="text-[10px] text-gray-600 mt-1">{doc.created_at}</p>
+        {typeof doc.created_at === 'string' && doc.created_at && (
+          <p className="text-[10px] text-gray-600 mt-1">{doc.created_at.split('T')[0]}</p>
         )}
       </div>
 
