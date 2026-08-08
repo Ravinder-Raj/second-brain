@@ -4,7 +4,11 @@ const initialState = {
   currentMode: 'discover', // "discover" | "connect" | "challenge"
   inputText: '',
   activeConversationId: null,
-  messages: [], // [{ id, role, content, mode, timestamp }]
+  messages: [], // [{ id, question, answer, mode, timestamp }]
+  isStreaming: false,
+  activeQuestion: null,
+  streamingAnswer: '',
+  streamingError: null,
 };
 
 const querySlice = createSlice({
@@ -24,12 +28,47 @@ const querySlice = createSlice({
       state.activeConversationId = null;
       state.inputText = '';
       state.messages = [];
+      state.isStreaming = false;
+      state.activeQuestion = null;
+      state.streamingAnswer = '';
+      state.streamingError = null;
     },
     addMessage: (state, action) => {
       state.messages.push(action.payload);
     },
     clearMessages: (state) => {
       state.messages = [];
+      state.isStreaming = false;
+      state.activeQuestion = null;
+      state.streamingAnswer = '';
+      state.streamingError = null;
+    },
+    startStreaming: (state, action) => {
+      state.isStreaming = true;
+      state.activeQuestion = action.payload;
+      state.streamingAnswer = '';
+      state.streamingError = null;
+    },
+    appendStreamingChunk: (state, action) => {
+      state.streamingAnswer += action.payload;
+    },
+    setStreamingError: (state, action) => {
+      state.streamingError = action.payload;
+    },
+    finishStreaming: (state) => {
+      if (state.activeQuestion && (state.streamingAnswer || state.streamingError)) {
+        state.messages.push({
+          id: Date.now().toString(),
+          question: state.activeQuestion,
+          answer: state.streamingAnswer || state.streamingError,
+          mode: state.currentMode,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
+      state.isStreaming = false;
+      state.activeQuestion = null;
+      state.streamingAnswer = '';
+      state.streamingError = null;
     },
   },
 });
@@ -41,6 +80,11 @@ export const {
   startNewConversation,
   addMessage,
   clearMessages,
+  startStreaming,
+  appendStreamingChunk,
+  setStreamingError,
+  finishStreaming,
 } = querySlice.actions;
 
 export default querySlice.reducer;
+

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   HiOutlinePaperAirplane,
@@ -9,8 +9,8 @@ import {
 
 import ModeSelector from './components/ModeSelector';
 import StreamingMessage from './components/StreamingMessage';
-import { useAskQuestionQuery } from './queryApi';
-import { setInputText, addMessage, clearMessages } from './querySlice';
+import { sendQueryStream } from './queryApi';
+import { setInputText, clearMessages } from './querySlice';
 import Button from '../../components/Button';
 import EmptyState from '../../components/EmptyState';
 
@@ -22,51 +22,54 @@ const SAMPLE_PROMPTS = [
 
 export default function QueryPage() {
   const dispatch = useDispatch();
-  const { currentMode, inputText, messages } = useSelector((s) => s.query);
+  const {
+    currentMode,
+    inputText,
+    messages,
+    isStreaming,
+    activeQuestion,
+    streamingAnswer,
+    streamingError,
+  } = useSelector((s) => s.query);
 
-  const [submittedQuestion, setSubmittedQuestion] = useState(null);
   const messagesEndRef = useRef(null);
-
-  // RTK Query SSE stream endpoint hook
-  const { data: streamData, isLoading: isStreaming } = useAskQuestionQuery(
-    { question: submittedQuestion, mode: currentMode },
-    { skip: !submittedQuestion }
-  );
+  const abortControllerRef = useRef(null);
 
   // Auto-scroll to bottom of messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamData?.answer]);
+  }, [messages, streamingAnswer, isStreaming]);
 
-  // When current stream completes or errors, append to message history stack
+  // Clean up streaming request on unmount
   useEffect(() => {
-    if (streamData?.done && submittedQuestion) {
-      if (streamData.answer || streamData.error) {
-        dispatch(
-          addMessage({
-            id: Date.now().toString(),
-            question: submittedQuestion,
-            answer: streamData.answer || streamData.error,
-            mode: currentMode,
-            timestamp: new Date().toLocaleTimeString(),
-          })
-        );
-      }
-      setSubmittedQuestion(null);
-    }
-  }, [streamData, submittedQuestion, currentMode, dispatch]);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const handleSubmit = (e) => {
     e?.preventDefault();
     const q = inputText.trim();
-    if (!q || submittedQuestion) return;
+    if (!q || isStreaming) return;
 
-    setSubmittedQuestion(q);
     dispatch(setInputText(''));
+    abortControllerRef.current = new AbortController();
+    sendQueryStream(
+      { question: q, mode: currentMode },
+      dispatch,
+      abortControllerRef.current.signal
+    );
   };
 
   const handlePromptClick = (promptText) => {
-    dispatch(setInputText(promptText));
+    if (isStreaming) return;
+    dispatch(setInputText(''));
+    abortControllerRef.current = new AbortController();
+    sendQueryStream(
+      { question: promptText, mode: currentMode },
+      dispatch,
+      abortControllerRef.current.signal
+    );
   };
 
   return (
@@ -85,9 +88,12 @@ export default function QueryPage() {
 
         <div className="flex items-center gap-3">
           <ModeSelector />
-          {messages.length > 0 && (
+          {(messages.length > 0 || isStreaming) && (
             <button
-              onClick={() => dispatch(clearMessages())}
+              onClick={() => {
+                abortControllerRef.current?.abort();
+                dispatch(clearMessages());
+              }}
               className="p-2 rounded-xl bg-surface-800 text-gray-400 hover:text-accent-red hover:bg-accent-red/10 transition-colors"
               title="Clear Conversation"
             >
@@ -99,7 +105,7 @@ export default function QueryPage() {
 
       {/* Main Chat Stream Container */}
       <main className="flex-1 overflow-y-auto p-6 space-y-6 max-w-4xl w-full mx-auto">
-        {messages.length === 0 && !submittedQuestion && (
+        {messages.length === 0 && !isStreaming && (
           <div className="py-12 text-center space-y-8 animate-fade-in">
             <EmptyState
               icon={HiOutlineSparkles}
@@ -152,12 +158,12 @@ export default function QueryPage() {
         ))}
 
         {/* Current Active Streaming Message */}
-        {submittedQuestion && (
+        {isStreaming && (
           <div className="space-y-4 animate-fade-in">
             {/* User Question */}
             <div className="flex justify-end">
               <div className="max-w-2xl px-5 py-3 rounded-2xl bg-brand-500 text-white text-sm font-medium shadow-lg">
-                {submittedQuestion}
+                {activeQuestion}
               </div>
             </div>
 
@@ -171,16 +177,16 @@ export default function QueryPage() {
                   <span className="font-semibold uppercase tracking-wider text-brand-400">{currentMode} Mode</span>
                   <span className="text-accent-amber animate-pulse">Streaming Response...</span>
                 </div>
-                {streamData?.answer ? (
-                  <StreamingMessage content={streamData.answer} isStreaming={!streamData.done} />
+                {streamingAnswer ? (
+                  <StreamingMessage content={streamingAnswer} isStreaming={true} />
                 ) : (
                   <div className="flex items-center gap-2 py-4 text-xs text-gray-400">
                     <span className="w-2 h-2 rounded-full bg-brand-400 animate-ping" />
                     Searching GraphRAG communities & entities...
                   </div>
                 )}
-                {streamData?.error && (
-                  <p className="text-xs text-accent-red mt-2">{streamData.error}</p>
+                {streamingError && (
+                  <p className="text-xs text-accent-red mt-2">{streamingError}</p>
                 )}
               </div>
             </div>
@@ -198,7 +204,7 @@ export default function QueryPage() {
             value={inputText}
             onChange={(e) => dispatch(setInputText(e.target.value))}
             placeholder={`Ask a question in ${currentMode.toUpperCase()} mode...`}
-            disabled={!!submittedQuestion}
+            disabled={isStreaming}
             className="flex-1 px-5 py-3.5 rounded-2xl bg-surface-900 border border-surface-500/50 text-sm text-gray-100 placeholder-gray-500 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition-all disabled:opacity-50"
           />
           <Button
@@ -206,8 +212,8 @@ export default function QueryPage() {
             size="md"
             type="submit"
             icon={HiOutlinePaperAirplane}
-            disabled={!inputText.trim() || !!submittedQuestion}
-            loading={!!submittedQuestion}
+            disabled={!inputText.trim() || isStreaming}
+            loading={isStreaming}
           >
             Ask
           </Button>
@@ -216,3 +222,4 @@ export default function QueryPage() {
     </div>
   );
 }
+

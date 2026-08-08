@@ -81,15 +81,27 @@ class Neo4jClient:
             logger.error("Neo4j unreachable — check NEO4J_URI")
             raise
 
+    def _ensure_driver(self):
+        """Lazy auto-connect if driver is not initialized yet."""
+        if self.driver is None:
+            logger.info("Neo4j driver not initialized — connecting now")
+            self.connect()
+        return self.driver
+
+    def session(self):
+        """Helper to return a managed database session with auto-reconnect."""
+        driver = self._ensure_driver()
+        return driver.session(database=self._db)
+
     def verify_connection(self):
         """Called by /health endpoint to confirm DB is still reachable."""
-        if self.driver is None:
-            raise RuntimeError("Neo4j driver not initialized")
-        self.driver.verify_connectivity()
+        driver = self._ensure_driver()
+        driver.verify_connectivity()
 
     def close(self):
         if self.driver:
             self.driver.close()
+            self.driver = None
             logger.info("Neo4j driver closed")
 
     # ── Documents ──────────────────────────────────────────────────
@@ -100,7 +112,7 @@ class Neo4jClient:
         MERGE — not CREATE. Same document uploaded twice
         updates it instead of creating a duplicate node.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MERGE (d:Document {id: $id})
@@ -120,7 +132,7 @@ class Neo4jClient:
     @with_retry()
     def mark_document_indexed(self, doc_id: str):
         """Called by Lambda after GraphRAG finishes indexing."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -136,7 +148,7 @@ class Neo4jClient:
     @with_retry()
     def mark_document_failed(self, doc_id: str, error: str):
         """Called by Lambda if GraphRAG indexing fails."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -152,7 +164,7 @@ class Neo4jClient:
     @with_retry()
     def get_document_status(self, doc_id: str) -> dict | None:
         """Used by /ingest/status polling endpoint."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             result = session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -172,7 +184,7 @@ class Neo4jClient:
     @with_retry()
     def get_all_documents(self) -> list[dict]:
         """Returns all documents for the sidebar list in frontend."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             result = session.run(
                 """
                 MATCH (d:Document)
@@ -199,7 +211,7 @@ class Neo4jClient:
         Deletes document and ALL its related entities.
         DETACH DELETE removes the node AND all its relationships.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MATCH (d:Document {id: $id})
@@ -227,7 +239,7 @@ class Neo4jClient:
         This is the core of GraphRAG — shared entities create
         cross-document connections automatically.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MERGE (e:Entity {id: $id})
@@ -254,7 +266,7 @@ class Neo4jClient:
         description: str,
     ):
         """Saves a relationship between two entities extracted by GraphRAG."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MATCH (a:Entity {id: $source_id})
@@ -282,7 +294,7 @@ class Neo4jClient:
         MERGE on community id so re-indexing updates instead of duplicating.
         Links the community to its source document.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             session.run(
                 """
                 MERGE (c:Community {id: $id})
@@ -312,7 +324,7 @@ class Neo4jClient:
         Uses a single transaction to avoid race conditions where an entity
         is deleted between two separate queries.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             with session.begin_transaction() as tx:
                 nodes_result = tx.run(
                     """
@@ -346,7 +358,7 @@ class Neo4jClient:
         Returns subgraph around specific entities.
         Used to highlight relevant nodes in Cytoscape.js after a user query.
         """
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             result = session.run(
                 """
                 MATCH (e:Entity)
@@ -381,7 +393,7 @@ class Neo4jClient:
     @with_retry()
     def search_entities(self, query: str) -> list[dict]:
         """Full-text search across entity names and descriptions."""
-        with self.driver.session(database=self._db) as session:
+        with self.session() as session:
             result = session.run(
                 """
                 MATCH (e:Entity)
