@@ -41,10 +41,22 @@ async def lifespan(app: FastAPI):
         logger.error(f"GraphRAG initialization failed: {e}", exc_info=True)
         raise
 
+    # Start SQS background worker for async indexing
+    import asyncio
+    from services.sqs import start_sqs_worker_loop
+    worker_task = asyncio.create_task(start_sqs_worker_loop())
+    logger.info("SQS background worker task launched ✓")
+
     yield  # app is running and serving requests
 
     # --- shutdown ---
-    logger.info("Shutting down — closing Neo4j connection")
+    logger.info("Shutting down — cancelling SQS background worker")
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Closing Neo4j connection")
     neo4j_client.close()
 
 

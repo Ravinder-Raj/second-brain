@@ -30,6 +30,7 @@ import asyncio
 import logging
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -165,6 +166,8 @@ embeddings:
     type: openai_embedding
     model: {embed_model}
     api_base: {api_base}
+    extra_body:
+      input_type: passage
 
 chunks:
   size: 300
@@ -399,12 +402,23 @@ class GraphRAGService:
             logs/               ← GraphRAG progress logs
             prompts/            ← default prompts (GraphRAG init writes these)
         """
-        (workdir / "input").mkdir(parents=True)
-        (workdir / "cache").mkdir()
-        (workdir / "output").mkdir()
-        (workdir / "logs").mkdir()
+        workdir.mkdir(parents=True, exist_ok=True)
 
-        # Write settings.yaml from template
+        # Generate default prompts (entity extraction, summarize, community report)
+        # GraphRAG's init command writes prompts/ to root. Run this FIRST before settings.yaml.
+        result = subprocess.run(
+            [sys.executable, "-m", "graphrag.index", "--init", "--root", str(workdir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            logger.warning("graphrag init stderr: %s", result.stderr[:500])
+
+        (workdir / "input").mkdir(parents=True, exist_ok=True)
+        (workdir / "cache").mkdir(exist_ok=True)
+        (workdir / "output").mkdir(exist_ok=True)
+        (workdir / "logs").mkdir(exist_ok=True)
+
+        # Write settings.yaml from template (overwrites default init settings.yaml with NVIDIA NIM config)
         settings_content = _SETTINGS_TEMPLATE.format(
             api_key   = self._settings.nvidia_api_key,
             model     = NVIDIA_NIM_MODEL,
@@ -415,17 +429,6 @@ class GraphRAGService:
 
         # Write document as plain text — GraphRAG input type is 'text'
         (workdir / "input" / "document.txt").write_text(text, encoding="utf-8")
-
-        # Generate default prompts (entity extraction, summarize, community report)
-        # GraphRAG's init command writes these to prompts/ automatically.
-        result = subprocess.run(
-            ["python", "-m", "graphrag", "init", "--root", str(workdir)],
-            capture_output=True, text=True, timeout=60,
-        )
-        # init may warn about existing files — that's fine, we only need prompts/
-        if result.returncode != 0:
-            # Non-fatal: prompts directory might already exist or init is informational
-            logger.warning("graphrag init output: %s", result.stderr[:500])
 
     def _run_indexing_subprocess(self, workdir: Path) -> None:
         """
@@ -442,7 +445,7 @@ class GraphRAGService:
         logger.info("Running GraphRAG indexing subprocess | workdir=%s", workdir)
 
         result = subprocess.run(
-            ["python", "-m", "graphrag", "index", "--root", str(workdir)],
+            [sys.executable, "-m", "graphrag.index", "--root", str(workdir)],
             capture_output=True,
             text=True,
             timeout=840,  # 14 minutes — Lambda timeout is 900s (15 min)
@@ -473,7 +476,7 @@ class GraphRAGService:
           output/artifacts/create_final_community_reports.parquet
           output/artifacts/create_final_text_units.parquet   ← used by LocalSearch context
         """
-        artifacts = workdir / "output" / "artifacts"
+        artifacts = workdir / "output" / "artifacts" if (workdir / "output" / "artifacts").exists() else workdir / "output"
 
         if not artifacts.exists():
             raise RuntimeError(
@@ -512,7 +515,7 @@ class GraphRAGService:
                 target      = r.target,
                 type        = r.description.split(" ")[0].upper() if r.description else "RELATES_TO",
                 description = r.description or "",
-                weight      = float(r.rank) if r.rank else 1.0,
+                weight      = float(getattr(r, "weight", getattr(r, "rank", 1.0)) or 1.0),
             )
             for r in graphrag_relationships
         ]

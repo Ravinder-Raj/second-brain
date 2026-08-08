@@ -133,3 +133,70 @@ def parse_message(sqs_event: dict) -> list[dict]:
         jobs.append(body)
 
     return jobs
+
+
+async def start_sqs_worker_loop():
+    """
+    Background worker loop that polls SQS for indexing jobs.
+    Runs asynchronously alongside FastAPI in ECS (or local dev).
+    Processes messages using lambda.handler's _process_job pipeline.
+    """
+    import importlib
+    handler_mod = importlib.import_module("lambda.handler")
+    from services.neo4j_client import neo4j_client
+    from services.graphrag import graphrag_service
+    from services.s3 import get_file
+
+    logger.info("SQS background worker starting polling on queue: %s", settings.sqs_queue_url)
+
+    while True:
+        try:
+            sqs = get_sqs_client()
+            response = await asyncio.to_thread(
+                sqs.receive_message,
+                QueueUrl=settings.sqs_queue_url,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=10,
+            )
+            messages = response.get("Messages", [])
+            for msg in messages:
+                receipt_handle = msg["ReceiptHandle"]
+                try:
+                    body = json.loads(msg["Body"])
+                    job = {
+                        "job_id": body["job_id"],
+                        "doc_id": body["doc_id"],
+                        "s3_key": body["s3_key"],
+                        "filename": body["filename"],
+                    }
+                    logger.info(f"Worker picked up job {job['job_id']} for doc {job['doc_id']}")
+                    await asyncio.to_thread(
+                        handler_mod._process_job,
+                        job,
+                        neo4j_client,
+                        graphrag_service,
+                        get_file,
+                    )
+                    await asyncio.to_thread(
+                        sqs.delete_message,
+                        QueueUrl=settings.sqs_queue_url,
+                        ReceiptHandle=receipt_handle,
+                    )
+                    logger.info(f"Worker completed job {job['job_id']}")
+                except Exception as ex:
+                    logger.error(f"Worker job error for doc '{body.get('doc_id')}': {ex}", exc_info=True)
+                    try:
+                        await asyncio.to_thread(
+                            sqs.delete_message,
+                            QueueUrl=settings.sqs_queue_url,
+                            ReceiptHandle=receipt_handle,
+                        )
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            logger.info("SQS background worker stopping...")
+            break
+        except Exception as e:
+            logger.error(f"SQS worker polling error: {e}")
+            await asyncio.sleep(5)
+

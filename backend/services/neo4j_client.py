@@ -125,6 +125,8 @@ class Neo4jClient:
                 """
                 MATCH (d:Document {id: $id})
                 SET d.indexed    = true,
+                    d.failed     = false,
+                    d.error      = null,
                     d.indexed_at = datetime()
                 """,
                 id=doc_id,
