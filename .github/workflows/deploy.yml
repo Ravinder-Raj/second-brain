@@ -1,0 +1,124 @@
+name: CI/CD Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-southeast-2
+  ECR_REPOSITORY: second-brain-backend
+  ECS_CLUSTER: second-brain-cluster
+  ECS_SERVICE: second-brain-backend-service
+  S3_FRONTEND_BUCKET: second-brain-frontend-rr319918
+
+jobs:
+  deploy-backend:
+    name: Build & Deploy Backend (ECS)
+    runs-on: ubuntu-latest
+    outputs:
+      backend_ip: ${{ steps.get-ip.outputs.ip }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Docker Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd backend
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Force New ECS Deployment
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for ECS Deployment & Get Public IP
+        id: get-ip
+        run: |
+          echo "Waiting 30 seconds for new ECS task to launch..."
+          sleep 30
+
+          TASK_ARN=$(aws ecs list-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service-name ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskArns[0]' --output text)
+
+          echo "Task ARN: $TASK_ARN"
+
+          ENI_ID=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks $TASK_ARN \
+            --region ${{ env.AWS_REGION }} \
+            --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
+            --output text)
+
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+            --network-interface-ids $ENI_ID \
+            --region ${{ env.AWS_REGION }} \
+            --query 'NetworkInterfaces[0].Association.PublicIp' \
+            --output text)
+
+          echo "Discovered Backend Public IP: $PUBLIC_IP"
+          echo "ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+  deploy-frontend:
+    name: Build & Deploy Frontend (S3)
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build Frontend
+        env:
+          VITE_API_BASE_URL: http://${{ needs.deploy-backend.outputs.backend_ip }}:8000/api
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Sync Build to S3 Website Bucket
+        run: |
+          aws s3 sync frontend/dist s3://${{ env.S3_FRONTEND_BUCKET }} --delete --region ${{ env.AWS_REGION }}
+          echo "Frontend successfully deployed to S3 website bucket!"
